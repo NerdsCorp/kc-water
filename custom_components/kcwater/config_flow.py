@@ -13,10 +13,29 @@ from .const import CONF_ACCOUNT, CONF_ACCOUNT_NUMBER, CONF_CUSTOMER_ID, CONF_SER
 from .coordinator import KCWaterApiError, KCWaterClient
 
 
-def _choices(user: dict[str, Any]) -> tuple[str, dict[str, dict[str, str]]]:
+def _choices(
+    user: dict[str, Any], customer: dict[str, Any] | None = None
+) -> tuple[str, dict[str, dict[str, str]]]:
     """Build stable UI choices only from account/service fields supplied by API."""
     customer_id = user.get("customerId")
     accounts = user.get("accounts")
+    if not isinstance(accounts, list) or not accounts:
+        accounts = []
+        if customer:
+            summary = customer.get("accountSummaryType")
+            context = customer.get("accountContext")
+            summary = summary if isinstance(summary, dict) else {}
+            context = context if isinstance(context, dict) else {}
+            services = summary.get("services") or customer.get("services")
+            if isinstance(services, list):
+                accounts.append(
+                    {
+                        "accountNumber": context.get("accountNumber") or summary.get("accountNumber"),
+                        "accountName": summary.get("fullName")
+                        or " ".join(str(summary.get(field) or "") for field in ("firstName", "lastName")).strip(),
+                        "services": services,
+                    }
+                )
     choices: dict[str, dict[str, str]] = {}
     if not isinstance(customer_id, (str, int)) or not isinstance(accounts, list):
         return "", choices
@@ -64,7 +83,13 @@ class KCWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             try:
                 user = await client.async_authenticate()
-                self._customer_id, self._choices = _choices(user)
+                customer_id = user.get("customerId")
+                if not isinstance(customer_id, (str, int)):
+                    errors["base"] = "accounts_unavailable"
+                    customer = None
+                else:
+                    customer = await client.async_get_customer(str(customer_id))
+                self._customer_id, self._choices = _choices(user, customer)
                 if not self._choices:
                     errors["base"] = "accounts_unavailable"
                 else:
@@ -118,7 +143,15 @@ class KCWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
             try:
                 user = await client.async_authenticate()
-                customer_id, choices = _choices(user)
+                customer_id = user.get("customerId")
+                if not isinstance(customer_id, (str, int)):
+                    return self.async_show_form(
+                        step_id="reauth_confirm",
+                        data_schema=vol.Schema({vol.Required(CONF_PASSWORD): str}),
+                        errors={"base": "account_missing"},
+                    )
+                customer = await client.async_get_customer(str(customer_id))
+                customer_id, choices = _choices(user, customer)
                 key = f"{entry.data[CONF_ACCOUNT_NUMBER]}|{entry.data[CONF_SERVICE_ID]}"
                 if key not in choices:
                     return self.async_show_form(

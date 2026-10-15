@@ -10,6 +10,7 @@ CONF_ACCOUNT_NUMBER = "account_number"
 API_BASE = "https://my.kcwater.us/rest"
 TOKEN_PATH = "/oauth/token"
 USAGE_PATH = "/usage/month/day"
+CUSTOMER_PATH = "/account/customer/"
 UPDATE_INTERVAL = timedelta(hours=6)
 
 # These values are the ones present in the supplied starter. Their validity must

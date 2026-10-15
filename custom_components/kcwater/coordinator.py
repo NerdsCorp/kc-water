@@ -17,6 +17,7 @@ from .const import (
     CONF_ACCOUNT_NUMBER,
     CONF_CUSTOMER_ID,
     CONF_SERVICE_ID,
+    CUSTOMER_PATH,
     DOMAIN,
     OAUTH_CLIENT_ID,
     OAUTH_CLIENT_SECRET,
@@ -58,6 +59,32 @@ class KCWaterClient:
         if not isinstance(user, dict) or not payload.get("access_token"):
             raise KCWaterApiError("Authentication response was missing required data")
         return user
+
+    async def async_get_customer(self, customer_id: str) -> dict[str, Any]:
+        """Fetch the signed-in customer's accounts and services."""
+        if not self.access_token:
+            raise KCWaterApiError("KC Water customer lookup requires authentication")
+        try:
+            async with self.session.post(
+                f"{API_BASE}{CUSTOMER_PATH}",
+                json={"customerId": customer_id, "accountContext": None},
+                headers={"Authorization": f"Bearer {self.access_token}", "Accept": "application/json"},
+                timeout=TIMEOUT,
+            ) as response:
+                if response.status in (401, 403):
+                    raise KCWaterAuthError("KC Water customer lookup was unauthorized")
+                if response.status == 429:
+                    raise KCWaterApiError("KC Water rate limit reached")
+                if response.status != 200:
+                    raise KCWaterApiError(f"KC Water customer lookup failed (HTTP {response.status})")
+                payload = await response.json(content_type=None)
+        except KCWaterApiError:
+            raise
+        except (aiohttp.ClientError, TimeoutError, ValueError) as err:
+            raise KCWaterApiError("Could not retrieve KC Water customer accounts") from err
+        if not isinstance(payload, dict):
+            raise KCWaterApiError("KC Water returned invalid customer data")
+        return payload
 
     async def _token_request(self, data: dict[str, str]) -> dict[str, Any]:
         try:
