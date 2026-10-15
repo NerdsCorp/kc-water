@@ -4,13 +4,26 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import aiohttp
+from homeassistant.components.recorder import get_instance
+from homeassistant.components.recorder.models import StatisticData, StatisticMetaData
+from homeassistant.components.recorder.statistics import (
+    async_add_external_statistics,
+    get_last_statistics,
+)
 from homeassistant.const import CONF_PASSWORD, CONF_USERNAME
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
+from homeassistant.util import dt as dt_util
+from homeassistant.util.unit_conversion import VolumeConverter
+
+try:
+    from homeassistant.components.recorder.models import StatisticMeanType
+except ImportError:  # Home Assistant versions before mean_type was introduced.
+    StatisticMeanType = None
 
 from .const import (
     API_BASE,
@@ -244,4 +257,84 @@ class KCWaterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         history = payload.get("history")
         if not isinstance(history, list):
             history = []
+        try:
+            await self._async_import_history_statistics(history)
+        except Exception:  # Recorder import failure should not take down live sensors.
+            _LOGGER.exception("Could not import KC Water billing history statistics")
         return {"history": history, "summary": table, "status": status}
+
+    async def _async_import_history_statistics(self, rows: list[Any]) -> None:
+        """Import portal billing periods as Energy-compatible external statistics."""
+        usage_by_date: dict[date, float] = {}
+        today = dt_util.now().date()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            reading_date = _history_date(row)
+            gallons = _nonnegative_number(row.get("gallonsConsumption"))
+            if reading_date is None or reading_date > today or gallons is None:
+                continue
+            usage_by_date[reading_date] = gallons
+        if not usage_by_date:
+            return
+
+        statistic_id = f"{DOMAIN}:{self.entry.entry_id.replace('-', '_').lower()}_billing_history"
+        recorder = get_instance(self.hass)
+        last_stats = await recorder.async_add_executor_job(
+            get_last_statistics, self.hass, 1, statistic_id, True, set()
+        )
+        existing = last_stats.get(statistic_id, [])
+        latest_start = existing[0]["start"] if existing else None
+        running_sum = float(existing[0].get("sum", 0)) if existing else 0.0
+
+        metadata: dict[str, Any] = {
+            "has_sum": True,
+            "name": "KC Water billing history",
+            "source": DOMAIN,
+            "statistic_id": statistic_id,
+            "unit_class": VolumeConverter.UNIT_CLASS,
+            "unit_of_measurement": "gal",
+        }
+        if StatisticMeanType is None:
+            metadata["has_mean"] = False
+        else:
+            metadata["mean_type"] = StatisticMeanType.NONE
+
+        timezone = dt_util.get_time_zone(self.hass.config.time_zone) or UTC
+        statistics: list[StatisticData] = []
+        for reading_date, gallons in sorted(usage_by_date.items()):
+            start = datetime.combine(reading_date, datetime.min.time(), tzinfo=timezone)
+            if latest_start is not None and start.timestamp() <= latest_start:
+                continue
+            running_sum += gallons
+            statistics.append(StatisticData(start=start, state=gallons, sum=running_sum))
+
+        if statistics:
+            async_add_external_statistics(self.hass, StatisticMetaData(**metadata), statistics)
+
+
+def _history_date(row: dict[str, Any]) -> date | None:
+    """Parse the portal's billing read date."""
+    for value in (row.get("chargeDateRaw"), row.get("readDate")):
+        if not value:
+            continue
+        if isinstance(value, date):
+            return value
+        text = str(value).strip()
+        for pattern in ("%d-%b-%Y", "%Y-%m-%d", "%m/%d/%Y", "%Y-%m-%dT%H:%M:%S"):
+            try:
+                return datetime.strptime(text[:19], pattern).date()
+            except ValueError:
+                continue
+    return None
+
+
+def _nonnegative_number(value: Any) -> float | None:
+    """Parse a finite, non-negative numeric usage value."""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number >= 0 and number < float("inf") else None
