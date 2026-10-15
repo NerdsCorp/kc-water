@@ -24,6 +24,7 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
         [KCWaterSensor(coordinator, entry, metric) for metric in (
             "daily_gallons", "daily_cubic_feet", "billing_gallons", "billing_cubic_feet",
             "average_gallons", "high_gallons", "water_total", "last_reading",
+            "price_per_gallon",
         )]
     )
 
@@ -41,7 +42,7 @@ class KCWaterSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_info = {
             "identifiers": {(DOMAIN, entry.entry_id)},
             "name": "KC Water",
-            "manufacturer": "Kansas City Water Services",
+            "manufacturer": "NerdsCorp",
             "configuration_url": "https://my.kcwater.us",
         }
         names = {
@@ -52,12 +53,16 @@ class KCWaterSensor(CoordinatorEntity, SensorEntity):
             "average_gallons": ("Average billing period usage", UnitOfVolume.GALLONS),
             "high_gallons": ("Highest billing period usage", UnitOfVolume.GALLONS),
             "water_total": ("Cumulative water consumption", UnitOfVolume.GALLONS),
+            "price_per_gallon": ("Latest billed cost per gallon", "USD/gal"),
             "last_reading": ("Last reading date", None),
         }
         self._attr_name, self._attr_native_unit_of_measurement = names[metric]
         if metric == "water_total":
             self._attr_device_class = SensorDeviceClass.WATER
             self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+            # Keep recorder statistics alive between monthly portal readings so
+            # the Energy dashboard can discover this cumulative source.
+            self._attr_force_update = True
         if metric == "last_reading":
             self._attr_device_class = SensorDeviceClass.DATE
             self._attr_state_class = None
@@ -70,6 +75,8 @@ class KCWaterSensor(CoordinatorEntity, SensorEntity):
             return max((item[0] for item in history), default=None)
         if self.metric == "water_total":
             return sum(gallons for _, gallons, _ in _valid_periods(data.get("history", [])))
+        if self.metric == "price_per_gallon":
+            return _latest_price_per_gallon(data.get("history", []))
         if self.metric.startswith("daily_"):
             periods = _valid_periods(data.get("history", []))
             if not periods:
@@ -145,6 +152,24 @@ def _valid_periods(rows: Any) -> list[tuple[date, float, float]]:
             continue
         result[reading_date] = (gallons, days or 0)
     return [(reading_date, gallons, days) for reading_date, (gallons, days) in sorted(result.items())]
+
+
+def _latest_price_per_gallon(rows: Any) -> float | None:
+    """Return the latest billed amount divided by its billed gallons."""
+    if not isinstance(rows, list):
+        return None
+    today = dt_util.now().date()
+    prices: dict[date, float] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        reading_date = _parse_date(row)
+        charge = _number(row.get("billedCharge"))
+        gallons = _number(row.get("gallonsConsumption"))
+        if reading_date is None or reading_date > today or charge is None or not gallons:
+            continue
+        prices[reading_date] = charge / gallons
+    return prices[max(prices)] if prices else None
 
 
 def _gallons_to_metric(gallons: float, metric: str) -> float:
