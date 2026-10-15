@@ -1,0 +1,10 @@
+{
+  "domain": "kcwater",
+  "name": "KC Water",
+  "codeowners": [],
+  "config_flow": true,
+  "documentation": "https://my.kcwater.us/",
+  "iot_class": "cloud_polling",
+  "requirements": [],
+  "version": "0.1.0"
+}

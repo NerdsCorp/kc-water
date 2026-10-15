@@ -1,0 +1,16 @@
+{
+  "config": {
+    "step": {
+      "user": {"title": "Connect to KC Water", "description": "Enter your KC Water portal credentials.", "data": {"username": "Username", "password": "Password"}},
+      "account": {"title": "Select account and service", "data": {"account": "Account and service"}},
+      "reauth_confirm": {"title": "Reauthenticate KC Water", "description": "Enter your updated portal password.", "data": {"password": "Password"}}
+    },
+    "error": {
+      "cannot_connect": "Could not connect to KC Water.",
+      "invalid_auth": "KC Water rejected these credentials.",
+      "accounts_unavailable": "The login response did not contain a supported account and service list.",
+      "account_missing": "The previously selected account or service is no longer available. Remove and add the integration again."
+    },
+    "abort": {"already_configured": "This username is already configured."}
+  }
+}
