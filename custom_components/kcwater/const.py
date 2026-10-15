@@ -9,7 +9,7 @@ CONF_SERVICE_ID = "service_id"
 CONF_ACCOUNT_NUMBER = "account_number"
 API_BASE = "https://my.kcwater.us/rest"
 TOKEN_PATH = "/oauth/token"
-USAGE_PATH = "/usage/month/day"
+USAGE_PATH = "/usage"
 CUSTOMER_PATH = "/account/customer/"
 UPDATE_INTERVAL = timedelta(hours=6)
 

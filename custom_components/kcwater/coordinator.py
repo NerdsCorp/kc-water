@@ -142,16 +142,15 @@ class KCWaterClient:
             if not await self._refresh():
                 await self._reauthenticate()
 
-        # The observed selector is DD-MMM-YYYY. Its semantics are still
-        # unverified; retain the captured shape without pretending it is monthly.
-        local_today = datetime.now().astimezone().date()
         body = {
             "customerId": entry_data[CONF_CUSTOMER_ID],
             "accountContext": {
                 "accountNumber": entry_data[CONF_ACCOUNT_NUMBER],
                 "serviceId": entry_data[CONF_SERVICE_ID],
             },
-            "month": local_today.strftime("%d-%b-%Y").upper(),
+            "direction": "current",
+            "page": "1",
+            "maxPerPage": "13",
         }
         try:
             async with self.session.post(
