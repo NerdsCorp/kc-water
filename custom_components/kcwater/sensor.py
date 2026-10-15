@@ -45,12 +45,12 @@ class KCWaterSensor(CoordinatorEntity, SensorEntity):
             "configuration_url": "https://my.kcwater.us",
         }
         names = {
-            "daily_gallons": ("Latest daily usage", UnitOfVolume.GALLONS),
-            "daily_cubic_feet": ("Latest daily usage", UnitOfVolume.CUBIC_FEET),
-            "billing_gallons": ("Portal period usage", UnitOfVolume.GALLONS),
-            "billing_cubic_feet": ("Portal period usage", UnitOfVolume.CUBIC_FEET),
-            "average_gallons": ("Average daily usage", UnitOfVolume.GALLONS),
-            "high_gallons": ("Highest daily usage", UnitOfVolume.GALLONS),
+            "daily_gallons": ("Latest period average daily usage", UnitOfVolume.GALLONS),
+            "daily_cubic_feet": ("Latest period average daily usage", UnitOfVolume.CUBIC_FEET),
+            "billing_gallons": ("Portal displayed range usage", UnitOfVolume.GALLONS),
+            "billing_cubic_feet": ("Portal displayed range usage", UnitOfVolume.CUBIC_FEET),
+            "average_gallons": ("Average billing period usage", UnitOfVolume.GALLONS),
+            "high_gallons": ("Highest billing period usage", UnitOfVolume.GALLONS),
             "last_reading": ("Last reading date", None),
         }
         self._attr_name, self._attr_native_unit_of_measurement = names[metric]
@@ -65,14 +65,20 @@ class KCWaterSensor(CoordinatorEntity, SensorEntity):
         if self.metric == "last_reading":
             return max((item[0] for item in history), default=None)
         if self.metric.startswith("daily_"):
-            if not history:
+            periods = _valid_periods(data.get("history", []))
+            if not periods:
                 return None
-            gallons = max(history, key=lambda item: item[0])[1]
+            _, gallons, days = max(periods, key=lambda item: item[0])
+            if days <= 0:
+                return None
+            gallons /= days
             return _gallons_to_metric(gallons, self.metric)
         summary = data.get("summary", {})
+        if self.metric == "billing_cubic_feet":
+            ccf = _number(summary.get("Total Usage"))
+            return ccf * 100 if ccf is not None else None
         keys = {
             "billing_gallons": "Total Gal Usage",
-            "billing_cubic_feet": "Total Usage",
             "average_gallons": "Average Gal Usage",
             "high_gallons": "High Gal Usage",
         }
@@ -114,19 +120,25 @@ def _parse_date(row: dict[str, Any]) -> date | None:
 
 def _valid_history(rows: Any) -> list[tuple[date, float]]:
     """Deduplicate readings, retain zeros, and omit future placeholders."""
+    return [(reading_date, gallons) for reading_date, gallons, _ in _valid_periods(rows)]
+
+
+def _valid_periods(rows: Any) -> list[tuple[date, float, float]]:
+    """Return valid portal billing periods with their service-day counts."""
     if not isinstance(rows, list):
         return []
     today = dt_util.now().date()
-    result: dict[date, float] = {}
+    result: dict[date, tuple[float, float]] = {}
     for row in rows:
         if not isinstance(row, dict):
             continue
         reading_date = _parse_date(row)
         gallons = _number(row.get("gallonsConsumption"))
+        days = _number(row.get("daysOfService"))
         if reading_date is None or reading_date > today or gallons is None:
             continue
-        result[reading_date] = gallons
-    return sorted(result.items())
+        result[reading_date] = (gallons, days or 0)
+    return [(reading_date, gallons, days) for reading_date, (gallons, days) in sorted(result.items())]
 
 
 def _gallons_to_metric(gallons: float, metric: str) -> float:

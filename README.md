@@ -16,7 +16,7 @@ Enter the portal username/password. The integration authenticates, then retrieve
 
 ## Sensors
 
-The integration creates latest daily gallons and cubic feet, portal period gallons and cubic feet (using the portal's own `Total Usage` summaries), average and high daily gallons from portal summaries, and last valid reading date. Summary labels are intentionally not called calendar-month totals: the portal period semantics have not been verified. Cubic feet from daily history are converted from gallons using 7.48051948 gallons per cubic foot; the portal's `Total Usage` summary is shown as cubic feet based on the observed response convention and should be confirmed against a sanitized capture.
+The portal's `history` rows are billing periods, not individual daily readings. The integration reports latest-period average daily gallons and cubic feet by dividing the period gallons by `daysOfService`; it also reports total gallons and cubic feet over the portal's displayed range, plus average and highest billing-period gallons. The portal reports range `Total Usage` in CCF, so it is multiplied by 100 to produce cubic feet. These are portal billing periods, not guaranteed calendar months. Cubic feet from gallons are converted using 7.48051948 gallons per cubic foot.
 
 History ignores future-dated placeholders, deduplicates by reading date, preserves legitimate zero readings, and omits malformed values. Polling is every six hours. Authentication is attempted on setup and access tokens use the reported `expires_in` (defaulting to the observed 3600 seconds only when absent); refresh failure falls back once to password authentication.
 
