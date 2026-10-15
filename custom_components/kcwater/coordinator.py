@@ -217,6 +217,15 @@ class KCWaterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
             raise ConfigEntryAuthFailed("KC Water credentials need to be re-entered") from err
         except KCWaterApiError as err:
             raise UpdateFailed(str(err)) from err
+        # Some portal failures arrive with HTTP 200 and an error string in the
+        # response body. Do not publish those as a successful empty usage result.
+        status = payload.get("status")
+        if isinstance(status, str) and status.strip().casefold() in {
+            "internal server error",
+            "error",
+            "failed",
+        }:
+            raise UpdateFailed("KC Water reported a usage service error")
         summary = payload.get("jsonData", {})
         if isinstance(summary, str):
             try:
@@ -236,4 +245,4 @@ class KCWaterCoordinator(DataUpdateCoordinator[dict[str, Any]]):
         history = payload.get("history")
         if not isinstance(history, list):
             history = []
-        return {"history": history, "summary": table, "status": payload.get("status")}
+        return {"history": history, "summary": table, "status": status}
