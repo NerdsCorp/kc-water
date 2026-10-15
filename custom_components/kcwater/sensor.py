@@ -23,7 +23,7 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
     async_add_entities(
         [KCWaterSensor(coordinator, entry, metric) for metric in (
             "daily_gallons", "daily_cubic_feet", "billing_gallons", "billing_cubic_feet",
-            "average_gallons", "high_gallons", "last_reading",
+            "average_gallons", "high_gallons", "water_total", "last_reading",
         )]
     )
 
@@ -51,9 +51,13 @@ class KCWaterSensor(CoordinatorEntity, SensorEntity):
             "billing_cubic_feet": ("Portal displayed range usage", UnitOfVolume.CUBIC_FEET),
             "average_gallons": ("Average billing period usage", UnitOfVolume.GALLONS),
             "high_gallons": ("Highest billing period usage", UnitOfVolume.GALLONS),
+            "water_total": ("Cumulative water consumption", UnitOfVolume.GALLONS),
             "last_reading": ("Last reading date", None),
         }
         self._attr_name, self._attr_native_unit_of_measurement = names[metric]
+        if metric == "water_total":
+            self._attr_device_class = SensorDeviceClass.WATER
+            self._attr_state_class = SensorStateClass.TOTAL_INCREASING
         if metric == "last_reading":
             self._attr_device_class = SensorDeviceClass.DATE
             self._attr_state_class = None
@@ -64,6 +68,8 @@ class KCWaterSensor(CoordinatorEntity, SensorEntity):
         history = _valid_history(data.get("history", []))
         if self.metric == "last_reading":
             return max((item[0] for item in history), default=None)
+        if self.metric == "water_total":
+            return sum(gallons for _, gallons, _ in _valid_periods(data.get("history", [])))
         if self.metric.startswith("daily_"):
             periods = _valid_periods(data.get("history", []))
             if not periods:
